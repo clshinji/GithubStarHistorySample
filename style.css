@@ -1,0 +1,23 @@
+/* Custom styles if needed */
+#star-chart {
+    width: 100% !important;
+    height: 100% !important;
+}
+
+.repo-item-color {
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+.repo-item-color::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.repo-item-color::-webkit-color-swatch {
+    border: 2px solid #e5e7eb;
+    border-radius: 9999px;
+}
