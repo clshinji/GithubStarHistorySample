@@ -9,6 +9,8 @@ const state = {
     chart: null,
     graphType: 'line',
     dateRange: 'full', // 'full' or 'custom'
+    logScale: false,
+    alignTimeline: false,
 };
 
 const COLORS = [
@@ -26,6 +28,10 @@ const customDateInputs = document.getElementById('custom-date-inputs');
 const startDateInput = document.getElementById('start-date');
 const endDateInput = document.getElementById('end-date');
 const graphTypeSelect = document.getElementById('graph-type');
+const logScaleCheck = document.getElementById('log-scale');
+const alignTimelineCheck = document.getElementById('align-timeline');
+const downloadPngBtn = document.getElementById('download-png');
+const exportCsvBtn = document.getElementById('export-csv');
 const settingsModal = document.getElementById('settings-modal');
 const openSettingsBtn = document.getElementById('open-settings');
 const closeSettingsBtn = document.getElementById('close-settings');
@@ -66,6 +72,18 @@ function setupEventListeners() {
         state.graphType = e.target.value;
         updateChart();
     });
+    logScaleCheck.addEventListener('change', (e) => {
+        state.logScale = e.target.checked;
+        updateChart();
+    });
+    alignTimelineCheck.addEventListener('change', (e) => {
+        state.alignTimeline = e.target.checked;
+        updateChart();
+    });
+
+    // Export Actions
+    downloadPngBtn.addEventListener('click', downloadPng);
+    exportCsvBtn.addEventListener('click', exportCsv);
 
     // Axis Range Controls
     document.getElementById('x-min').addEventListener('change', updateChart);
@@ -106,6 +124,12 @@ function initChart() {
                     title: { display: true, text: 'Stars' },
                     beginAtZero: true
                 }
+            },
+            plugins: {
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
             }
         }
     });
@@ -115,10 +139,22 @@ async function updateChart() {
     if (!state.chart) return;
 
     const datasets = state.repositories.map(repo => {
-        let data = repo.starHistory.map(p => ({ x: new Date(p.date), y: p.count }));
+        let data;
+        
+        if (state.alignTimeline) {
+            // Align by days since creation
+            const createdDate = new Date(repo.createdAt);
+            data = repo.starHistory.map(p => ({
+                x: Math.floor((new Date(p.date) - createdDate) / (1000 * 60 * 60 * 24)),
+                y: p.count
+            }));
+        } else {
+            // Use absolute dates
+            data = repo.starHistory.map(p => ({ x: new Date(p.date), y: p.count }));
+        }
 
-        // Filter by date range
-        if (state.dateRange === 'custom') {
+        // Filter by date range (only if not aligned)
+        if (!state.alignTimeline && state.dateRange === 'custom') {
             const start = startDateInput.value ? new Date(startDateInput.value) : new Date(0);
             const end = endDateInput.value ? new Date(endDateInput.value) : new Date();
             data = data.filter(p => p.x >= start && p.x <= end);
@@ -128,7 +164,7 @@ async function updateChart() {
             label: repo.fullName,
             data: data,
             borderColor: repo.color,
-            backgroundColor: state.graphType.includes('bar') ? repo.color : 'transparent',
+            backgroundColor: state.graphType.includes('bar') ? repo.color + '88' : 'transparent',
             fill: state.graphType === 'stacked-bar',
             tension: 0.1,
             borderWidth: 2,
@@ -136,9 +172,27 @@ async function updateChart() {
         };
     });
 
+    // Update Axis Config
     state.chart.config.type = state.graphType === 'line' ? 'line' : 'bar';
     state.chart.options.scales.x.stacked = state.graphType === 'stacked-bar';
     state.chart.options.scales.y.stacked = state.graphType === 'stacked-bar';
+    
+    // Scale Type
+    state.chart.options.scales.y.type = state.logScale ? 'logarithmic' : 'linear';
+    if (state.logScale) {
+        state.chart.options.scales.y.min = 1; // Log scale can't start at 0
+    } else {
+        state.chart.options.scales.y.beginAtZero = true;
+    }
+
+    // X Axis Type
+    if (state.alignTimeline) {
+        state.chart.options.scales.x.type = 'linear';
+        state.chart.options.scales.x.title.text = 'Days since creation';
+    } else {
+        state.chart.options.scales.x.type = 'time';
+        state.chart.options.scales.x.title.text = 'Time';
+    }
 
     // Apply manual axis ranges
     const xMin = document.getElementById('x-min').value;
@@ -146,13 +200,47 @@ async function updateChart() {
     const yMin = document.getElementById('y-min').value;
     const yMax = document.getElementById('y-max').value;
 
-    state.chart.options.scales.x.min = xMin ? new Date(xMin) : undefined;
-    state.chart.options.scales.x.max = xMax ? new Date(xMax) : undefined;
-    state.chart.options.scales.y.min = yMin !== '' ? parseFloat(yMin) : undefined;
+    if (state.alignTimeline) {
+        state.chart.options.scales.x.min = xMin !== '' ? parseFloat(xMin) : undefined;
+        state.chart.options.scales.x.max = xMax !== '' ? parseFloat(xMax) : undefined;
+    } else {
+        state.chart.options.scales.x.min = xMin ? new Date(xMin) : undefined;
+        state.chart.options.scales.x.max = xMax ? new Date(xMax) : undefined;
+    }
+    state.chart.options.scales.y.min = yMin !== '' ? parseFloat(yMin) : (state.logScale ? 1 : undefined);
     state.chart.options.scales.y.max = yMax !== '' ? parseFloat(yMax) : undefined;
 
     state.chart.data.datasets = datasets;
     state.chart.update();
+}
+
+// --- Export Functions ---
+function downloadPng() {
+    const link = document.createElement('a');
+    link.download = 'star-history.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+}
+
+function exportCsv() {
+    if (state.repositories.length === 0) return;
+    
+    let csvContent = 'repo,date,stars\n';
+    state.repositories.forEach(repo => {
+        repo.starHistory.forEach(p => {
+            csvContent += `${repo.fullName},${p.date},${p.count}\n`;
+        });
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'star-history.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
 
 // --- GitHub API Functions ---
