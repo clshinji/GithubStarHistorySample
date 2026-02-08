@@ -234,11 +234,14 @@ async function fetchStarHistory(fullName, totalStars) {
     if (maxPages <= sampleCount) {
         for (let i = 1; i <= maxPages; i++) pagesToFetch.push(i);
     } else {
+        // Distribute samples more densely for high star counts
         for (let i = 0; i < sampleCount; i++) {
             const page = Math.max(1, Math.floor((i / (sampleCount - 1)) * (maxPages - 1)) + 1);
             if (!pagesToFetch.includes(page)) pagesToFetch.push(page);
         }
     }
+    
+    console.log(`Fetching star history for ${fullName}. Total: ${totalStars}, Sampling pages: ${pagesToFetch}`);
 
     for (const page of pagesToFetch) {
         try {
