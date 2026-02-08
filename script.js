@@ -11,6 +11,7 @@ const state = {
     dateRange: 'full', // 'full' or 'custom'
     logScale: false,
     alignTimeline: false,
+    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
 };
 
 const COLORS = [
@@ -44,6 +45,12 @@ function init() {
     setupEventListeners();
     githubTokenInput.value = state.githubToken;
     initChart();
+    
+    // Listen for theme changes
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        state.theme = e.matches ? 'dark' : 'light';
+        updateChart();
+    });
 }
 
 function setupEventListeners() {
@@ -121,14 +128,18 @@ function initChart() {
                     title: { display: true, text: 'Time' }
                 },
                 y: {
-                    title: { display: true, text: 'Stars' },
-                    beginAtZero: true
+                    title: { display: true, text: 'Stars' }
                 }
             },
             plugins: {
                 tooltip: {
                     mode: 'index',
                     intersect: false
+                },
+                legend: {
+                    labels: {
+                        usePointStyle: true
+                    }
                 }
             }
         }
@@ -142,56 +153,72 @@ async function updateChart() {
         let data;
         
         if (state.alignTimeline) {
-            // Align by days since creation
             const createdDate = new Date(repo.createdAt);
             data = repo.starHistory.map(p => ({
                 x: Math.floor((new Date(p.date) - createdDate) / (1000 * 60 * 60 * 24)),
                 y: p.count
             }));
         } else {
-            // Use absolute dates
             data = repo.starHistory.map(p => ({ x: new Date(p.date), y: p.count }));
         }
 
-        // Filter by date range (only if not aligned)
         if (!state.alignTimeline && state.dateRange === 'custom') {
             const start = startDateInput.value ? new Date(startDateInput.value) : new Date(0);
             const end = endDateInput.value ? new Date(endDateInput.value) : new Date();
             data = data.filter(p => p.x >= start && p.x <= end);
         }
 
+        const color = repo.color;
+        const isBar = state.graphType.includes('bar');
+
         return {
             label: repo.fullName,
             data: data,
-            borderColor: repo.color,
-            backgroundColor: state.graphType.includes('bar') ? repo.color + '88' : 'transparent',
-            fill: state.graphType === 'stacked-bar',
+            borderColor: color,
+            backgroundColor: isBar ? color + 'bb' : color + '22',
+            fill: state.graphType === 'stacked-bar' || state.graphType === 'line',
             tension: 0.1,
-            borderWidth: 2,
-            pointRadius: 0
+            borderWidth: isBar ? 1 : 2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            stepped: false
         };
     });
 
-    // Update Axis Config
+    // Theme adjustment
+    const textColor = state.theme === 'dark' ? '#e5e7eb' : '#374151';
+    const gridColor = state.theme === 'dark' ? '#374151' : '#e5e7eb';
+
     state.chart.config.type = state.graphType === 'line' ? 'line' : 'bar';
-    state.chart.options.scales.x.stacked = state.graphType === 'stacked-bar';
-    state.chart.options.scales.y.stacked = state.graphType === 'stacked-bar';
     
-    // Scale Type
-    state.chart.options.scales.y.type = state.logScale ? 'logarithmic' : 'linear';
+    // Scales Configuration
+    const scales = state.chart.options.scales;
+    scales.x.stacked = state.graphType === 'stacked-bar';
+    scales.y.stacked = state.graphType === 'stacked-bar';
+    
+    // Log Scale & Auto-scale Min
+    scales.y.type = state.logScale ? 'logarithmic' : 'linear';
     if (state.logScale) {
-        state.chart.options.scales.y.min = 1; // Log scale can't start at 0
+        let minVal = Infinity;
+        state.repositories.forEach(r => {
+            r.starHistory.forEach(p => {
+                if (p.count > 0 && p.count < minVal) minVal = p.count;
+            });
+        });
+        // Set min to nearest power of 10
+        scales.y.min = minVal === Infinity ? 1 : Math.pow(10, Math.floor(Math.log10(minVal)));
     } else {
-        state.chart.options.scales.y.beginAtZero = true;
+        scales.y.beginAtZero = true;
+        scales.y.min = undefined;
     }
 
     // X Axis Type
     if (state.alignTimeline) {
-        state.chart.options.scales.x.type = 'linear';
-        state.chart.options.scales.x.title.text = 'Days since creation';
+        scales.x.type = 'linear';
+        scales.x.title.text = 'Days since creation';
     } else {
-        state.chart.options.scales.x.type = 'time';
-        state.chart.options.scales.x.title.text = 'Time';
+        scales.x.type = 'time';
+        scales.x.title.text = 'Time';
     }
 
     // Apply manual axis ranges
@@ -201,14 +228,23 @@ async function updateChart() {
     const yMax = document.getElementById('y-max').value;
 
     if (state.alignTimeline) {
-        state.chart.options.scales.x.min = xMin !== '' ? parseFloat(xMin) : undefined;
-        state.chart.options.scales.x.max = xMax !== '' ? parseFloat(xMax) : undefined;
+        scales.x.min = xMin !== '' ? parseFloat(xMin) : undefined;
+        scales.x.max = xMax !== '' ? parseFloat(xMax) : undefined;
     } else {
-        state.chart.options.scales.x.min = xMin ? new Date(xMin) : undefined;
-        state.chart.options.scales.x.max = xMax ? new Date(xMax) : undefined;
+        scales.x.min = xMin ? new Date(xMin) : undefined;
+        scales.x.max = xMax ? new Date(xMax) : undefined;
     }
-    state.chart.options.scales.y.min = yMin !== '' ? parseFloat(yMin) : (state.logScale ? 1 : undefined);
-    state.chart.options.scales.y.max = yMax !== '' ? parseFloat(yMax) : undefined;
+    if (yMin !== '') scales.y.min = parseFloat(yMin);
+    if (yMax !== '') scales.y.max = parseFloat(yMax);
+
+    // Apply Theme Colors
+    scales.x.title.color = textColor;
+    scales.x.ticks.color = textColor;
+    scales.x.grid.color = gridColor;
+    scales.y.title.color = textColor;
+    scales.y.ticks.color = textColor;
+    scales.y.grid.color = gridColor;
+    state.chart.options.plugins.legend.labels.color = textColor;
 
     state.chart.data.datasets = datasets;
     state.chart.update();
@@ -296,15 +332,20 @@ async function fetchRepoInfo(fullName) {
     return await res.json();
 }
 
-async function fetchStarHistory(fullName, totalStars) {
+async function fetchWithToken(url) {
     const headers = state.githubToken ? { 
         'Authorization': `token ${state.githubToken}`,
         'Accept': 'application/vnd.github.v3.star+json'
     } : {
         'Accept': 'application/vnd.github.v3.star+json'
     };
+    const res = await fetch(url, { headers });
+    if (res.status === 403) throw new Error('API rate limit exceeded. Please add a GitHub Token.');
+    return res;
+}
 
-    const sampleCount = 30;
+async function fetchStarHistory(fullName, totalStars) {
+    const sampleCount = 40;
     const starHistory = [];
     
     // Add point at 0
@@ -313,54 +354,61 @@ async function fetchStarHistory(fullName, totalStars) {
 
     if (totalStars === 0) return starHistory;
 
-    // GitHub API restriction: only first ~40,000 stargazers (400 pages) are accessible
-    const GITHUB_PAGE_LIMIT = 400;
-    const accessibleStars = Math.min(totalStars, GITHUB_PAGE_LIMIT * 100);
-    const maxPages = Math.ceil(accessibleStars / 100);
-    const pagesToFetch = [];
-    
-    if (maxPages <= sampleCount) {
-        for (let i = 1; i <= maxPages; i++) pagesToFetch.push(i);
-    } else {
-        // Distribute samples more densely for high star counts
-        for (let i = 0; i < sampleCount; i++) {
-            const page = Math.max(1, Math.floor((i / (sampleCount - 1)) * (maxPages - 1)) + 1);
-            if (!pagesToFetch.includes(page)) pagesToFetch.push(page);
+    // Smart Sampling with Binary Search for API limit
+    console.log(`Searching API limit for ${fullName}...`);
+    let minPage = 1;
+    let maxPage = Math.ceil(totalStars / 100);
+    let limitPage = maxPage;
+
+    // Quick check for maxPage
+    const checkMax = await fetchWithToken(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${maxPage}`);
+    if (!checkMax.ok) {
+        // Binary search for the last accessible page
+        let low = 1;
+        let high = maxPage;
+        while (low <= high) {
+            let mid = Math.floor((low + high) / 2);
+            const res = await fetchWithToken(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${mid}`);
+            if (res.ok) {
+                limitPage = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
         }
     }
     
-    console.log(`Fetching star history for ${fullName}. Total: ${totalStars}, Sampling pages: ${pagesToFetch}`);
+    console.log(`API Limit for ${fullName} found at page ${limitPage}`);
 
-    for (const page of pagesToFetch) {
-        try {
-            const res = await fetch(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${page}`, { headers });
-            if (!res.ok) {
-                if (res.status === 403) throw new Error('API rate limit exceeded. Please add a GitHub Token.');
-                // If 422, we might have hit a limit even before page 400 for some reason, just skip
-                if (res.status === 422) {
-                    console.warn(`Reached GitHub API limit at page ${page}`);
-                    break; 
-                }
-                throw new Error(`Failed to fetch stargazers (${res.status})`);
-            }
-            const data = await res.json();
-            if (data.length > 0) {
+    const pagesToFetch = [];
+    for (let i = 0; i < sampleCount; i++) {
+        const page = Math.max(1, Math.floor((i / (sampleCount - 1)) * (limitPage - 1)) + 1);
+        if (!pagesToFetch.includes(page)) pagesToFetch.push(page);
+    }
+
+    // Parallel Fetch in chunks
+    const chunkSize = 5;
+    for (let i = 0; i < pagesToFetch.length; i += chunkSize) {
+        const chunk = pagesToFetch.slice(i, i + chunkSize);
+        const results = await Promise.all(chunk.map(page => 
+            fetchWithToken(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${page}`)
+                .then(res => res.ok ? res.json() : null)
+                .catch(() => null)
+        ));
+        
+        results.forEach((data, index) => {
+            if (data && data.length > 0) {
                 starHistory.push({
                     date: data[0].starred_at,
-                    count: (page - 1) * 100
+                    count: (chunk[index] - 1) * 100
                 });
             }
-        } catch (e) {
-            console.error(`Error fetching page ${page}:`, e);
-            if (e.message.includes('rate limit')) throw e;
-            // For other errors, continue to get as much data as possible
-        }
+        });
     }
 
-    // Add current point (always use totalStars for the latest point)
+    // Add current point
     starHistory.push({ date: new Date().toISOString(), count: totalStars });
     
-    // Sort and remove duplicates
     return starHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
 }
 
@@ -369,11 +417,11 @@ function renderRepoList() {
     repoList.innerHTML = '';
     state.repositories.forEach((repo, index) => {
         const li = document.createElement('li');
-        li.className = 'flex items-center justify-between bg-gray-50 p-2 rounded border';
+        li.className = 'flex items-center justify-between bg-gray-50 dark:bg-gray-700 p-2 rounded border dark:border-gray-600';
         li.innerHTML = `
             <div class="flex items-center space-x-2">
                 <input type="color" class="repo-item-color" value="${repo.color}" data-index="${index}">
-                <span class="text-sm font-medium truncate max-w-[120px]" title="${repo.fullName}">${repo.fullName}</span>
+                <span class="text-sm font-medium truncate max-w-[120px] dark:text-gray-200" title="${repo.fullName}">${repo.fullName}</span>
             </div>
             <button class="remove-repo text-gray-400 hover:text-red-500" data-index="${index}">
                 <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
@@ -382,7 +430,6 @@ function renderRepoList() {
         repoList.appendChild(li);
     });
 
-    // Add event listeners to list items
     document.querySelectorAll('.repo-item-color').forEach(input => {
         input.addEventListener('change', (e) => {
             const index = e.target.dataset.index;
