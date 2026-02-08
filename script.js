@@ -149,6 +149,9 @@ function initChart() {
 async function updateChart() {
     if (!state.chart) return;
 
+    const isBar = state.graphType.includes('bar');
+    const isStacked = state.graphType === 'stacked-bar';
+
     const datasets = state.repositories.map(repo => {
         let data;
         
@@ -169,34 +172,31 @@ async function updateChart() {
         }
 
         const color = repo.color;
-        const isBar = state.graphType.includes('bar');
 
         return {
             label: repo.fullName,
             data: data,
             borderColor: color,
-            backgroundColor: isBar ? color + 'bb' : color + '22',
-            fill: state.graphType === 'stacked-bar' || state.graphType === 'line',
+            backgroundColor: isBar ? color + '88' : color + '22',
+            fill: isStacked || state.graphType === 'line',
             tension: 0.1,
-            borderWidth: isBar ? 1 : 2,
+            borderWidth: 2,
             pointRadius: 0,
             pointHoverRadius: 5,
-            stepped: false
+            barPercentage: 1,
+            categoryPercentage: 1
         };
     });
 
-    // Theme adjustment
     const textColor = state.theme === 'dark' ? '#e5e7eb' : '#374151';
     const gridColor = state.theme === 'dark' ? '#374151' : '#e5e7eb';
 
     state.chart.config.type = state.graphType === 'line' ? 'line' : 'bar';
     
-    // Scales Configuration
     const scales = state.chart.options.scales;
-    scales.x.stacked = state.graphType === 'stacked-bar';
-    scales.y.stacked = state.graphType === 'stacked-bar';
+    scales.x.stacked = isStacked;
+    scales.y.stacked = isStacked;
     
-    // Log Scale & Auto-scale Min
     scales.y.type = state.logScale ? 'logarithmic' : 'linear';
     if (state.logScale) {
         let minVal = Infinity;
@@ -205,14 +205,12 @@ async function updateChart() {
                 if (p.count > 0 && p.count < minVal) minVal = p.count;
             });
         });
-        // Set min to nearest power of 10
         scales.y.min = minVal === Infinity ? 1 : Math.pow(10, Math.floor(Math.log10(minVal)));
     } else {
         scales.y.beginAtZero = true;
         scales.y.min = undefined;
     }
 
-    // X Axis Type
     if (state.alignTimeline) {
         scales.x.type = 'linear';
         scales.x.title.text = 'Days since creation';
@@ -221,7 +219,6 @@ async function updateChart() {
         scales.x.title.text = 'Time';
     }
 
-    // Apply manual axis ranges
     const xMin = document.getElementById('x-min').value;
     const xMax = document.getElementById('x-max').value;
     const yMin = document.getElementById('y-min').value;
@@ -237,7 +234,6 @@ async function updateChart() {
     if (yMin !== '') scales.y.min = parseFloat(yMin);
     if (yMax !== '') scales.y.max = parseFloat(yMax);
 
-    // Apply Theme Colors
     scales.x.title.color = textColor;
     scales.x.ticks.color = textColor;
     scales.x.grid.color = gridColor;
@@ -348,46 +344,19 @@ async function fetchStarHistory(fullName, totalStars) {
     const sampleCount = 40;
     const starHistory = [];
     
-    // Add point at 0
     const repoInfo = await fetchRepoInfo(fullName);
     starHistory.push({ date: repoInfo.created_at, count: 0 });
 
     if (totalStars === 0) return starHistory;
 
-    // Smart Sampling with Binary Search for API limit
-    console.log(`Searching API limit for ${fullName}...`);
-    let minPage = 1;
-    let maxPage = Math.ceil(totalStars / 100);
-    let limitPage = maxPage;
-
-    // Quick check for maxPage
-    const checkMax = await fetchWithToken(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${maxPage}`);
-    if (!checkMax.ok) {
-        // Binary search for the last accessible page
-        let low = 1;
-        let high = maxPage;
-        while (low <= high) {
-            let mid = Math.floor((low + high) / 2);
-            const res = await fetchWithToken(`https://api.github.com/repos/${fullName}/stargazers?per_page=100&page=${mid}`);
-            if (res.ok) {
-                limitPage = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-    }
-    
-    console.log(`API Limit for ${fullName} found at page ${limitPage}`);
-
+    const maxPage = Math.ceil(totalStars / 100);
     const pagesToFetch = [];
     for (let i = 0; i < sampleCount; i++) {
-        const page = Math.max(1, Math.floor((i / (sampleCount - 1)) * (limitPage - 1)) + 1);
+        const page = Math.max(1, Math.floor((i / (sampleCount - 1)) * (maxPage - 1)) + 1);
         if (!pagesToFetch.includes(page)) pagesToFetch.push(page);
     }
-
-    // Parallel Fetch in chunks
-    const chunkSize = 5;
+    
+    const chunkSize = 8;
     for (let i = 0; i < pagesToFetch.length; i += chunkSize) {
         const chunk = pagesToFetch.slice(i, i + chunkSize);
         const results = await Promise.all(chunk.map(page => 
@@ -406,7 +375,6 @@ async function fetchStarHistory(fullName, totalStars) {
         });
     }
 
-    // Add current point
     starHistory.push({ date: new Date().toISOString(), count: totalStars });
     
     return starHistory.sort((a, b) => new Date(a.date) - new Date(b.date));
