@@ -11,7 +11,7 @@ const state = {
     dateRange: 'full', // 'full' or 'custom'
     logScale: false,
     alignTimeline: false,
-    theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    theme: localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
 };
 
 const COLORS = [
@@ -39,21 +39,48 @@ const closeSettingsBtn = document.getElementById('close-settings');
 const saveSettingsBtn = document.getElementById('save-settings');
 const githubTokenInput = document.getElementById('github-token');
 const canvas = document.getElementById('star-chart');
+const themeToggleBtn = document.getElementById('theme-toggle');
+const themeToggleDarkIcon = document.getElementById('theme-toggle-dark-icon');
+const themeToggleLightIcon = document.getElementById('theme-toggle-light-icon');
 
 // --- Initialization ---
 function init() {
     setupEventListeners();
     githubTokenInput.value = state.githubToken;
+    updateThemeUI();
     initChart();
     
-    // Listen for theme changes
+    // Listen for theme changes (only if no manual preference set)
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-        state.theme = e.matches ? 'dark' : 'light';
-        updateChart();
+        if (!localStorage.getItem('theme')) {
+            state.theme = e.matches ? 'dark' : 'light';
+            updateThemeUI();
+            updateChart();
+        }
     });
 }
 
+function updateThemeUI() {
+    if (state.theme === 'dark') {
+        document.documentElement.classList.add('dark');
+        themeToggleLightIcon.classList.remove('hidden');
+        themeToggleDarkIcon.classList.add('hidden');
+    } else {
+        document.documentElement.classList.remove('dark');
+        themeToggleLightIcon.classList.add('hidden');
+        themeToggleDarkIcon.classList.remove('hidden');
+    }
+}
+
 function setupEventListeners() {
+    // Theme Toggle
+    themeToggleBtn.addEventListener('click', () => {
+        state.theme = state.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', state.theme);
+        updateThemeUI();
+        updateChart();
+    });
+
     // Repository Management
     addRepoBtn.addEventListener('click', () => addRepository(repoInput.value));
     repoInput.addEventListener('keypress', (e) => {
